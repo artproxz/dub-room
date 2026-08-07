@@ -84,7 +84,18 @@ async function jsonRequest(url, options = {}) {
   return data;
 }
 
-function me() { return room?.participants.find((p) => p.id === participantId); }
+function normalizeRoomState(value) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    ...value,
+    participants: Array.isArray(value.participants) ? value.participants : [],
+    clips: Array.isArray(value.clips) ? value.clips : [],
+    player: value.player && typeof value.player === 'object' ? value.player : { currentTime: 0, playing: false },
+    range: value.range && typeof value.range === 'object' ? value.range : { start: 0, end: 30 },
+  };
+}
+
+function me() { return room?.participants?.find((p) => p.id === participantId); }
 function isHost() { return room?.hostParticipantId === participantId; }
 function videoDuration() { return Number(room?.video?.duration) || document.querySelector('#movie')?.duration || 0; }
 
@@ -180,7 +191,8 @@ async function enterRoom(name, code = null) {
     const result = code
       ? await jsonRequest(`/api/rooms/${encodeURIComponent(code)}/join`, { method: 'POST', body: JSON.stringify({ participantId, name }) })
       : await jsonRequest('/api/rooms', { method: 'POST', body: JSON.stringify({ participantId, name }) });
-    room = result.room;
+    room = normalizeRoomState(result.room);
+    if (!room?.id) throw new Error('Сервер вернул некорректное состояние комнаты. Обновите страницу.');
     const url = new URL(location.href);
     url.searchParams.set('room', room.id);
     history.replaceState({}, '', url);
@@ -193,7 +205,8 @@ function connectEvents() {
   eventSource?.close();
   eventSource = new EventSource(`/api/rooms/${room.id}/events?participantId=${encodeURIComponent(participantId)}`);
   eventSource.addEventListener('room-state', (event) => {
-    room = JSON.parse(event.data);
+    room = normalizeRoomState(JSON.parse(event.data));
+    if (!room) return;
     if (mode === 'idle') renderStudio(); else pendingRender = true;
   });
   eventSource.addEventListener('participant-level', (event) => {
