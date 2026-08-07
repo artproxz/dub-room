@@ -9,19 +9,26 @@ let analyser = null;
 let audioContext = null;
 let meterFrame = null;
 let lastLevelSentAt = 0;
+let currentMicLevel = 0;
+let mode = 'idle';
 let recorder = null;
 let recorderChunks = [];
-let activeTake = null;
-let mode = 'idle';
-let pendingRender = false;
+let recordingSession = null;
+let recordingPeaks = [];
+let lastPeakAt = 0;
 let startTimer = null;
 let stopTimer = null;
 let countdownTimer = null;
 let previewTimer = null;
-let previewAudios = [];
-let previewTakeId = null;
+let playbackAudios = [];
+let playbackTimers = [];
+let pendingRender = false;
+let selectedClipId = null;
+let contextMenu = null;
+let visibleSeconds = 60;
+let viewStart = 0;
+let middlePanning = false;
 const levelHistory = new Map();
-
 const initialRoomCode = new URLSearchParams(location.search).get('room')?.toUpperCase() || '';
 
 function escapeHtml(value) {
@@ -30,9 +37,21 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function formatTime(value) {
-  const total = Math.max(0, Math.floor(Number(value) || 0));
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+function clampNumber(value, min, max) {
+  const n = Number(value);
+  return Math.max(min, Math.min(max, Number.isFinite(n) ? n : min));
+}
+
+function formatTime(value, precise = false) {
+  const n = Math.max(0, Number(value) || 0);
+  const whole = Math.floor(n);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const seconds = whole % 60;
+  const base = hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return precise ? `${base}.${String(Math.floor((n % 1) * 1000)).padStart(3, '0')}` : base;
 }
 
 function formatSize(bytes) {
@@ -52,7 +71,7 @@ function showToast(message, error = false) {
   toast.textContent = message;
   toast.onclick = () => toast.remove();
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => toast.remove(), 5500);
+  toast._timer = setTimeout(() => toast.remove(), 5000);
 }
 
 async function jsonRequest(url, options = {}) {
@@ -65,21 +84,24 @@ async function jsonRequest(url, options = {}) {
   return data;
 }
 
+function me() { return room?.participants.find((p) => p.id === participantId); }
+function isHost() { return room?.hostParticipantId === participantId; }
+function videoDuration() { return Number(room?.video?.duration) || document.querySelector('#movie')?.duration || 0; }
+
 async function ensureMicrophone() {
   if (micStream?.active) return micStream;
   micStream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     video: false,
   });
-
   audioContext = new AudioContext();
   const source = audioContext.createMediaStreamSource(micStream);
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
-  analyser.smoothingTimeConstant = 0.72;
+  analyser.smoothingTimeConstant = 0.7;
   source.connect(analyser);
-
   const data = new Uint8Array(analyser.fftSize);
+
   const tick = () => {
     if (!analyser) return;
     analyser.getByteTimeDomainData(data);
@@ -88,17 +110,24 @@ async function ensureMicrophone() {
       const n = (sample - 128) / 128;
       sum += n * n;
     }
-    const level = Math.min(1, Math.sqrt(sum / data.length) * 5.5);
+    const level = Math.min(1, Math.sqrt(sum / data.length) * 5.6);
+    currentMicLevel = level;
     updateLevel(participantId, level);
-    const now = performance.now();
-    if (room && now - lastLevelSentAt > 90) {
+
+    const t = performance.now();
+    if (mode === 'recording' && recordingSession?.armedParticipantIds.includes(participantId) && t - lastPeakAt > 45) {
+      recordingPeaks.push(level);
+      lastPeakAt = t;
+      updateLiveRecordingBlocks();
+    }
+    if (room && t - lastLevelSentAt > 90) {
       fetch(`/api/rooms/${room.id}/level`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ participantId, level }),
         keepalive: true,
       }).catch(() => undefined);
-      lastLevelSentAt = now;
+      lastLevelSentAt = t;
     }
     meterFrame = requestAnimationFrame(tick);
   };
@@ -117,17 +146,15 @@ function renderLobby() {
     <main class="landing-shell">
       <section class="landing-card">
         <div class="brand brand-large"><span class="brand-dot"></span>DUBROOM</div>
-        <h1>Озвучьте сцену вслепую.<br>Потом услышите весь хаос вместе.</h1>
-        <p class="lead">До трёх участников. Во время записи никто не слышит остальных — только видит, кто сейчас говорит.</p>
+        <h1>Фильм сверху.<br>Ваш хаос — на таймлайне.</h1>
+        <p class="lead">Совместная озвучка до трёх человек: каждый пишет свою дорожку, двигает клипы и слышит остальных только на итоговом прослушивании.</p>
         <form id="lobby-form" class="join-form">
-          <label>Ваше имя
-            <input id="name" maxlength="32" placeholder="Например, Дима" value="${escapeHtml(savedName)}" autocomplete="nickname" required>
-          </label>
+          <label>Ваше имя<input id="name" maxlength="32" placeholder="Например, Дима" value="${escapeHtml(savedName)}" autocomplete="nickname" required></label>
           ${initialRoomCode ? `<label>Код комнаты<input id="room-code" maxlength="8" value="${escapeHtml(initialRoomCode)}" required></label>` : ''}
-          <button class="primary huge" type="submit">${initialRoomCode ? 'Войти в комнату' : 'Создать комнату'}</button>
+          <button class="primary huge" type="submit">${initialRoomCode ? 'Войти в студию' : 'Создать студию'}</button>
           ${!initialRoomCode ? '<button class="secondary" type="button" id="join-by-code">У меня уже есть код</button>' : ''}
         </form>
-        <div class="permission-note">🎙 При входе браузер попросит доступ к микрофону. Ваш живой голос другим участникам не передаётся.</div>
+        <div class="permission-note">🎙 Браузер запросит микрофон. Во время REC живые голоса участников друг другу не передаются.</div>
       </section>
     </main>`;
 
@@ -137,7 +164,6 @@ function renderLobby() {
     const code = initialRoomCode ? document.querySelector('#room-code').value.trim().toUpperCase() : null;
     await enterRoom(name, code);
   });
-
   document.querySelector('#join-by-code')?.addEventListener('click', async () => {
     const name = document.querySelector('#name').value.trim();
     const code = prompt('Введите код комнаты')?.trim().toUpperCase();
@@ -147,11 +173,8 @@ function renderLobby() {
 
 async function enterRoom(name, code = null) {
   if (!name) return showToast('Введите имя участника.', true);
-  try {
-    await ensureMicrophone();
-  } catch {
-    return showToast('Без разрешения на микрофон озвучка не заработает. Разрешите доступ и попробуйте снова.', true);
-  }
+  try { await ensureMicrophone(); }
+  catch { return showToast('Разрешите доступ к микрофону и попробуйте снова.', true); }
   localStorage.setItem('dubroom:name', name);
   try {
     const result = code
@@ -163,19 +186,15 @@ async function enterRoom(name, code = null) {
     history.replaceState({}, '', url);
     connectEvents();
     renderStudio();
-  } catch (error) {
-    showToast(error.message, true);
-  }
+  } catch (error) { showToast(error.message, true); }
 }
 
 function connectEvents() {
   eventSource?.close();
   eventSource = new EventSource(`/api/rooms/${room.id}/events?participantId=${encodeURIComponent(participantId)}`);
-
   eventSource.addEventListener('room-state', (event) => {
     room = JSON.parse(event.data);
-    if (mode === 'idle') renderStudio();
-    else pendingRender = true;
+    if (mode === 'idle') renderStudio(); else pendingRender = true;
   });
   eventSource.addEventListener('participant-level', (event) => {
     const data = JSON.parse(event.data);
@@ -184,13 +203,28 @@ function connectEvents() {
   eventSource.addEventListener('player-state', (event) => applyPlayerState(JSON.parse(event.data)));
   eventSource.addEventListener('recording-countdown', (event) => beginLocalRecording(JSON.parse(event.data)));
   eventSource.addEventListener('recording-stop', (event) => scheduleLocalStop(JSON.parse(event.data)));
-  eventSource.addEventListener('take-upload-progress', (event) => updateUploadProgress(JSON.parse(event.data)));
-  eventSource.addEventListener('take-ready', (event) => {
-    const take = JSON.parse(event.data);
-    updateUploadProgress(null);
-    showToast('Дубль готов — слушаем, что вы натворили 😄');
-    beginPreview({ ...take, previewAt: Date.now() + 850 });
-  });
-  eventSource.addEventListener('preview-take', (event) => beginPreview(JSON.parse(event.data)));
+  eventSource.addEventListener('mix-preview', (event) => beginMixPreview(JSON.parse(event.data)));
+  eventSource.addEventListener('clip-created', () => { if (mode === 'idle') showToast('Новая аудиозапись добавлена на таймлайн.'); });
 }
 
+async function updateParticipant(patch) {
+  try {
+    await jsonRequest(`/api/rooms/${room.id}/participant`, {
+      method: 'POST', body: JSON.stringify({ participantId, ...patch }),
+    });
+  } catch (error) { showToast(error.message, true); }
+}
+
+async function copyInvite() {
+  const url = new URL(location.href);
+  url.searchParams.set('room', room.id);
+  try { await navigator.clipboard.writeText(url.toString()); showToast('Ссылка-приглашение скопирована.'); }
+  catch { prompt('Скопируйте ссылку:', url.toString()); }
+}
+
+window.addEventListener('beforeunload', () => {
+  eventSource?.close();
+  stopProjectAudio();
+  micStream?.getTracks().forEach((track) => track.stop());
+  if (meterFrame) cancelAnimationFrame(meterFrame);
+});
