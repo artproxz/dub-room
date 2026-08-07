@@ -227,14 +227,14 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
 
-    if (req.method === 'GET' && pathname.startsWith('/media/')) {
+    if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/media/')) {
       const relative = decodeURIComponent(pathname.slice('/media/'.length));
       const target = path.resolve(DATA_DIR, relative);
       if (!target.startsWith(DATA_DIR + path.sep)) return sendJson(res, 403, { error: 'Недопустимый путь.' });
       return serveFile(req, res, target);
     }
 
-    if (req.method === 'GET') {
+    if (req.method === 'GET' || req.method === 'HEAD') {
       const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
       const target = path.resolve(PUBLIC_DIR, relative);
       if (target.startsWith(PUBLIC_DIR + path.sep) || target === path.join(PUBLIC_DIR, 'index.html')) {
