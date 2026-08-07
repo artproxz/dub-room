@@ -210,7 +210,7 @@ async function serveFile(req, res, filePath, contentType = null) {
   const common = {
     'content-type': mime,
     'accept-ranges': 'bytes',
-    'cache-control': ext === '.html' ? 'no-store' : 'private, max-age=3600',
+    'cache-control': ['.html', '.js', '.css'].includes(ext) ? 'no-store' : 'private, max-age=3600',
   };
 
   if (req.method === 'HEAD') {
