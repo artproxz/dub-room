@@ -1,0 +1,9 @@
+services:
+  dubroom:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - dubroom_data:/app/data
+volumes:
+  dubroom_data:
