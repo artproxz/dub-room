@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT ?? 3001);
 const ROOM_TTL_MS = 48 * 60 * 60 * 1000;
 const MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 250 * 1024 * 1024;
+const DEFAULT_COLORS = ['#ff405f', '#ff405f', '#ff405f'];
 
 await fsp.mkdir(DATA_DIR, { recursive: true });
 
@@ -32,22 +33,60 @@ function makeRoomCode() {
   return code;
 }
 
+function clamp(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
+function sanitizeColor(value, fallback = DEFAULT_COLORS[0]) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : fallback;
+}
+
+function participantPublic(participant) {
+  return {
+    id: participant.id,
+    name: participant.name,
+    connected: participant.connected,
+    color: participant.color,
+    armed: Boolean(participant.armed),
+    ready: Boolean(participant.ready),
+  };
+}
+
+function clipPublic(clip) {
+  return {
+    id: clip.id,
+    participantId: clip.participantId,
+    start: clip.start,
+    duration: clip.duration,
+    volume: clip.volume,
+    peaks: clip.peaks,
+    url: clip.url,
+    mimeType: clip.mimeType,
+    createdAt: clip.createdAt,
+  };
+}
+
 function publicRoom(room) {
   return {
     id: room.id,
     createdAt: room.createdAt,
     hostParticipantId: room.hostParticipantId,
-    participants: [...room.participants.values()].map(({ id, name, connected }) => ({ id, name, connected })),
+    participants: [...room.participants.values()].map(participantPublic),
     video: room.video,
     player: room.player,
+    range: room.range,
+    clips: room.clips.map(clipPublic),
     recording: room.recording ? {
-      takeId: room.recording.takeId,
+      sessionId: room.recording.sessionId,
       startTime: room.recording.startTime,
+      endTime: room.recording.endTime,
       startAt: room.recording.startAt,
       stopAt: room.recording.stopAt,
+      armedParticipantIds: room.recording.armedParticipantIds,
     } : undefined,
-    takes: room.takes,
-    selectedTakeId: room.selectedTakeId,
   };
 }
 
@@ -70,16 +109,14 @@ function broadcast(room, event, data, exceptParticipantId = null) {
   for (const [participantId, connections] of room.sse.entries()) {
     if (participantId === exceptParticipantId) continue;
     for (const res of connections) {
-      try { sendSse(res, event, data); } catch { /* connection is closing */ }
+      try { sendSse(res, event, data); } catch { /* connection closing */ }
     }
   }
 }
 
-function broadcastRoom(room) {
-  broadcast(room, 'room-state', publicRoom(room));
-}
+function broadcastRoom(room) { broadcast(room, 'room-state', publicRoom(room)); }
 
-async function readJson(req, limit = 64 * 1024) {
+async function readJson(req, limit = 96 * 1024) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
@@ -92,7 +129,7 @@ async function readJson(req, limit = 64 * 1024) {
 }
 
 function safeFileName(name = '') {
-  return name.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._ -]/g, '_').slice(0, 180) || 'video';
+  return String(name).replace(/[^a-zA-Z0-9а-яА-ЯёЁ._ -]/g, '_').slice(0, 180) || 'file';
 }
 
 function extensionFrom(contentType = '', fileName = '') {
@@ -144,34 +181,20 @@ function requireRoom(roomId, res) {
   return room;
 }
 
-function stopRecording(room, stopAt) {
-  const recording = room.recording;
-  if (!recording) return;
-  if (recording.timer) clearTimeout(recording.timer);
-  const endTime = recording.startTime + Math.max(0, stopAt - recording.startAt) / 1000;
-  room.pendingTake = {
-    id: recording.takeId,
-    startTime: recording.startTime,
-    endTime,
-    expectedParticipantIds: recording.expectedParticipantIds,
-    tracks: new Map(),
-  };
-  room.recording = undefined;
-  room.player = { currentTime: endTime, playing: false };
-  touch(room);
-  broadcastRoom(room);
-  broadcast(room, 'recording-stop', {
-    takeId: room.pendingTake.id,
-    stopAt,
-    startTime: room.pendingTake.startTime,
-    endTime: room.pendingTake.endTime,
-  });
+function resetReady(room) {
+  for (const participant of room.participants.values()) participant.ready = false;
+}
+
+function parsePeaks(header) {
+  if (!header) return [];
+  const values = String(header).split(',').slice(0, 220);
+  return values.map((value) => clamp(Number(value) / 100, 0, 1));
 }
 
 async function serveFile(req, res, filePath, contentType = null) {
   let stat;
   try { stat = await fsp.stat(filePath); } catch { sendJson(res, 404, { error: 'Файл не найден.' }); return; }
-  if (!stat.isFile()) { sendJson(res, 404, { error: 'Файл не найден.' }); return; }
+  if (!stat.isFile()) return sendJson(res, 404, { error: 'Файл не найден.' });
 
   const ext = path.extname(filePath).toLowerCase();
   const mime = contentType || ({
@@ -179,68 +202,59 @@ async function serveFile(req, res, filePath, contentType = null) {
     '.js': 'text/javascript; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
     '.mp4': 'video/mp4',
-    '.webm': filePath.includes(`${path.sep}takes${path.sep}`) ? 'audio/webm' : 'video/webm',
+    '.webm': filePath.includes(`${path.sep}clips${path.sep}`) ? 'audio/webm' : 'video/webm',
     '.ogg': 'audio/ogg',
     '.mov': 'video/quicktime',
   }[ext] || 'application/octet-stream');
 
-  const baseHeaders = {
+  const common = {
     'content-type': mime,
     'accept-ranges': 'bytes',
     'cache-control': ext === '.html' ? 'no-store' : 'private, max-age=3600',
-    'last-modified': stat.mtime.toUTCString(),
   };
+
+  if (req.method === 'HEAD') {
+    res.writeHead(200, { ...common, 'content-length': stat.size });
+    res.end();
+    return;
+  }
 
   const range = req.headers.range;
   if (range && stat.size > 0) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
-    if (!match || (!match[1] && !match[2])) {
-      res.writeHead(416, { ...baseHeaders, 'content-range': `bytes */${stat.size}` });
-      res.end();
-      return;
-    }
-
-    let start;
-    let end;
-    if (!match[1]) {
-      const suffixLength = Number(match[2]);
-      if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
-        res.writeHead(416, { ...baseHeaders, 'content-range': `bytes */${stat.size}` });
+    if (match) {
+      let start;
+      let end;
+      if (!match[1] && match[2]) {
+        const suffix = Math.max(0, Number(match[2]) || 0);
+        start = Math.max(0, stat.size - suffix);
+        end = stat.size - 1;
+      } else {
+        start = match[1] ? Number(match[1]) : 0;
+        end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
+      }
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= stat.size) {
+        res.writeHead(416, { 'content-range': `bytes */${stat.size}` });
         res.end();
         return;
       }
-      start = Math.max(0, stat.size - suffixLength);
-      end = stat.size - 1;
-    } else {
-      start = Number(match[1]);
-      end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
-    }
-
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= stat.size) {
-      res.writeHead(416, { ...baseHeaders, 'content-range': `bytes */${stat.size}` });
-      res.end();
+      res.writeHead(206, {
+        ...common,
+        'content-range': `bytes ${start}-${end}/${stat.size}`,
+        'content-length': end - start + 1,
+      });
+      fs.createReadStream(filePath, { start, end }).pipe(res);
       return;
     }
-
-    const headers = {
-      ...baseHeaders,
-      'content-range': `bytes ${start}-${end}/${stat.size}`,
-      'content-length': end - start + 1,
-    };
-    res.writeHead(206, headers);
-    if (req.method === 'HEAD') { res.end(); return; }
-    fs.createReadStream(filePath, { start, end }).pipe(res);
-    return;
   }
 
-  res.writeHead(200, { ...baseHeaders, 'content-length': stat.size });
-  if (req.method === 'HEAD') { res.end(); return; }
+  res.writeHead(200, { ...common, 'content-length': stat.size });
   fs.createReadStream(filePath).pipe(res);
 }
 
-
 export {
-  http, fsp, path, DATA_DIR, PUBLIC_DIR, PORT, ROOM_TTL_MS, MAX_VIDEO_BYTES, MAX_AUDIO_BYTES, rooms,
+  http, fsp, path, DATA_DIR, PUBLIC_DIR, PORT, ROOM_TTL_MS, MAX_VIDEO_BYTES, MAX_AUDIO_BYTES, DEFAULT_COLORS, rooms,
   now, makeRoomCode, publicRoom, sendJson, sendSse, broadcast, broadcastRoom, readJson, safeFileName,
-  extensionFrom, streamUpload, parseRoute, requireRoom, stopRecording, serveFile, touch, isHost, roomDir, randomId,
+  extensionFrom, streamUpload, parseRoute, requireRoom, serveFile, touch, isHost, roomDir, randomId,
+  clamp, sanitizeColor, resetReady, parsePeaks,
 };

@@ -1,12 +1,13 @@
 {
   "name": "dub-room",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=22" },
   "scripts": {
     "dev": "node --watch server/index.js",
     "start": "node server/index.js",
-    "check": "node --check server/index.js && node --check public/app-core.js && node --check public/app-ui.js && node --check public/app-recording.js",
+    "check": "node --check server/index.js && node --check server/lib.js && node --check public/app-core.js && node --check public/app-ui.js && node --check public/app-recording.js",
     "test": "node tests/smoke.mjs"
   }
 }
