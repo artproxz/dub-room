@@ -171,6 +171,8 @@ function stopRecording(room, stopAt) {
 async function serveFile(req, res, filePath, contentType = null) {
   let stat;
   try { stat = await fsp.stat(filePath); } catch { sendJson(res, 404, { error: 'Файл не найден.' }); return; }
+  if (!stat.isFile()) { sendJson(res, 404, { error: 'Файл не найден.' }); return; }
+
   const ext = path.extname(filePath).toLowerCase();
   const mime = contentType || ({
     '.html': 'text/html; charset=utf-8',
@@ -181,34 +183,58 @@ async function serveFile(req, res, filePath, contentType = null) {
     '.ogg': 'audio/ogg',
     '.mov': 'video/quicktime',
   }[ext] || 'application/octet-stream');
+
+  const baseHeaders = {
+    'content-type': mime,
+    'accept-ranges': 'bytes',
+    'cache-control': ext === '.html' ? 'no-store' : 'private, max-age=3600',
+    'last-modified': stat.mtime.toUTCString(),
+  };
+
   const range = req.headers.range;
   if (range && stat.size > 0) {
-    const match = /bytes=(\d*)-(\d*)/.exec(range);
-    if (match) {
-      const start = match[1] ? Number(match[1]) : 0;
-      const end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
-      if (start > end || start >= stat.size) {
-        res.writeHead(416, { 'content-range': `bytes */${stat.size}` });
+    const match = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+    if (!match || (!match[1] && !match[2])) {
+      res.writeHead(416, { ...baseHeaders, 'content-range': `bytes */${stat.size}` });
+      res.end();
+      return;
+    }
+
+    let start;
+    let end;
+    if (!match[1]) {
+      const suffixLength = Number(match[2]);
+      if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+        res.writeHead(416, { ...baseHeaders, 'content-range': `bytes */${stat.size}` });
         res.end();
         return;
       }
-      res.writeHead(206, {
-        'content-type': mime,
-        'content-range': `bytes ${start}-${end}/${stat.size}`,
-        'accept-ranges': 'bytes',
-        'content-length': end - start + 1,
-        'cache-control': 'private, max-age=3600',
-      });
-      fs.createReadStream(filePath, { start, end }).pipe(res);
+      start = Math.max(0, stat.size - suffixLength);
+      end = stat.size - 1;
+    } else {
+      start = Number(match[1]);
+      end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
+    }
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= stat.size) {
+      res.writeHead(416, { ...baseHeaders, 'content-range': `bytes */${stat.size}` });
+      res.end();
       return;
     }
+
+    const headers = {
+      ...baseHeaders,
+      'content-range': `bytes ${start}-${end}/${stat.size}`,
+      'content-length': end - start + 1,
+    };
+    res.writeHead(206, headers);
+    if (req.method === 'HEAD') { res.end(); return; }
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+    return;
   }
-  res.writeHead(200, {
-    'content-type': mime,
-    'content-length': stat.size,
-    'accept-ranges': 'bytes',
-    'cache-control': ext === '.html' ? 'no-store' : 'private, max-age=3600',
-  });
+
+  res.writeHead(200, { ...baseHeaders, 'content-length': stat.size });
+  if (req.method === 'HEAD') { res.end(); return; }
   fs.createReadStream(filePath).pipe(res);
 }
 
