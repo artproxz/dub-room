@@ -16,7 +16,7 @@ function renderStudio() {
         <div class="stage-card">
           ${room.video ? `
             <div class="video-wrap">
-              <video id="movie" src="${escapeHtml(room.video.url)}" ${host ? 'controls' : ''} muted playsinline></video>
+              <video id="movie" src="${escapeHtml(room.video.url)}" ${host ? 'controls' : ''} muted playsinline preload="metadata"></video>
               <div id="stage-overlay"></div>
             </div>
             <div class="stage-controls">
@@ -58,6 +58,16 @@ function renderStudio() {
     movie.addEventListener('play', () => syncPlayer(true));
     movie.addEventListener('pause', () => syncPlayer(false));
     movie.addEventListener('seeked', () => syncPlayer(!movie.paused));
+    movie.addEventListener('error', () => {
+      const code = movie.error?.code;
+      const messages = {
+        1: 'Загрузка видео была прервана.',
+        2: 'Не удалось получить видео с сервера. Обновите страницу после завершения деплоя.',
+        3: 'Браузер не смог декодировать видео. Скорее всего, внутри MP4 используется неподдерживаемый кодек.',
+        4: 'Формат или кодек видео не поддерживается браузером. Лучше использовать MP4 с H.264 (AVC) и AAC.',
+      };
+      showToast(messages[code] || 'Не удалось открыть видео в браузере.', true);
+    });
     if (!host) movie.controls = false;
   }
 
@@ -182,4 +192,3 @@ async function stopTake() {
     showToast(error.message, true);
   }
 }
-
