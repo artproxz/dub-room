@@ -67,6 +67,22 @@ try {
     body: Buffer.from('fake-video'),
   });
   assert.equal(res.status, 200);
+  const uploadedVideo = await res.json();
+
+  res = await fetch(`${base}${uploadedVideo.url}`, { method: 'HEAD' });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('accept-ranges'), 'bytes');
+  assert.equal(res.headers.get('content-type'), 'video/mp4');
+  assert.equal(res.headers.get('content-length'), String(Buffer.byteLength('fake-video')));
+
+  res = await fetch(`${base}${uploadedVideo.url}`, { headers: { range: 'bytes=0-3' } });
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('content-range'), `bytes 0-3/${Buffer.byteLength('fake-video')}`);
+  assert.equal(await res.text(), 'fake');
+
+  res = await fetch(`${base}${uploadedVideo.url}`, { headers: { range: 'bytes=-5' } });
+  assert.equal(res.status, 206);
+  assert.equal(await res.text(), 'video');
 
   result = await json(`${base}/api/rooms/${roomId}/recording/start`, {
     method: 'POST',
