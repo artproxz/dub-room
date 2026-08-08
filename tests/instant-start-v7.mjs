@@ -11,7 +11,7 @@ const movie = { currentTime: 12.25, pause(){}, play(){ return Promise.resolve();
 const S = {
   filmVolume: .8,
   room: { id:'ROOM1', range:{start:10,end:16}, recordings:[], participants:[{id:participantId,armed:true}], clips:[] },
-  mode:'idle', localSession:null, micStream:{active:true}, audioContext:null,
+  mode:'idle', localSession:null, micStream:{active:true}, audioContext:null, _armSyncPromise:Promise.resolve(true),
   playbackTimers:[], playbackAudios:[], levelHistory:new Map(), lastLevelSentAt:0,
 };
 const context = vm.createContext({
@@ -38,6 +38,7 @@ const context = vm.createContext({
   updateControls(){},
   clearOverlay(){},
   toast(){},
+  saveParticipantPatch:()=>Promise.resolve(),
   pickMime:()=>'',
   json(_url,options){requestBody=JSON.parse(options.body);return new Promise(r=>{resolveServer=r;});},
   playVoiceClips(){},clearPlaybackAudio(){},temporarilyMuteLobby(){},
@@ -47,6 +48,7 @@ const context = vm.createContext({
 vm.runInContext(source, context);
 const run = context.startOwnRecording();
 assert.equal(localStarted, true, 'local recording must start before server response');
+await new Promise(r=>setTimeout(r,0));
 assert.equal(requestBody.startTime, 12.25);
 assert.equal(typeof requestBody.sessionId, 'string');
 assert.ok(requestBody.sessionId.length >= 6);

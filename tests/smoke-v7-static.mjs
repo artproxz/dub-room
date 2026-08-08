@@ -7,7 +7,7 @@ assert.match(patch, /max=\"3\"/);
 assert.match(patch, /createMediaElementSource/);
 assert.match(patch, /noiseSuppression/);
 assert.match(patch, /echoCancellation/);
-assert.match(patch, /S\._recordServerPromise=json/);
+assert.match(patch, /S\._recordServerPromise=Promise\.resolve/);
 assert.match(patch, /beginLocalRecording\(provisional\)/);
 assert.match(patch, /function beginFinalPreview/);
 assert.match(css, /\.preview-v5\{display:none!important\}/);

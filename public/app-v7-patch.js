@@ -81,6 +81,13 @@ bindStudio=function(){
   document.querySelector('#film-volume')?.addEventListener('input',e=>{S.filmVolume=clamp(Number(e.target.value),0,3);localStorage.setItem('dubroom:film-volume',String(S.filmVolume));applyMovieSound();});
   ensureMovieAudioGraph();applyMovieSound();updateNoiseUi();
 };
+
+function toggleRecArm(){
+  if(S.mode==='recording'||S.mode==='countdown')return Promise.resolve();const p=me();if(!p)return Promise.resolve();
+  S._armSyncPromise=saveParticipantPatch({armed:!p.armed,ready:false},true).then(()=>{applyVoicePolicy();updateControls();return true;});
+  return S._armSyncPromise;
+}
+
 function bindPlayersOnlyV7(){
   document.querySelector('#lobby-mute')?.addEventListener('click',()=>{S.manualVoiceMute=!S.manualVoiceMute;applyVoicePolicy();patchVoiceUi();});
   document.querySelector('#color-input')?.addEventListener('input',e=>saveParticipantPatch({color:e.target.value,ready:false},true));
@@ -104,7 +111,7 @@ async function startOwnRecording(){
   if(m){m.pause();m.currentTime=startTime;updatePlayhead(startTime);}
   const provisional={sessionId,participantId,startTime,endTime:S.room.range.end,startAt:Date.now(),stopAt:Date.now()+Math.max(100,(S.room.range.end-startTime)*1000)};
   S.room.recordings=S.room.recordings.filter(r=>r.participantId!==participantId);S.room.recordings.push(provisional);
-  S._recordServerPromise=json(`/api/rooms/${S.room.id}/recording/start`,{method:'POST',body:JSON.stringify({participantId,startTime,sessionId})}).then(p=>{if(S.localSession?.sessionId===sessionId)Object.assign(S.localSession,p);return p;}).catch(e=>{if(S.localSession?.sessionId===sessionId)abortLocalRecordingV7(e.message);toast(e.message,true);return null;});
+  S._recordServerPromise=Promise.resolve(S._armSyncPromise).then(()=>json(`/api/rooms/${S.room.id}/recording/start`,{method:'POST',body:JSON.stringify({participantId,startTime,sessionId})})).then(p=>{if(S.localSession?.sessionId===sessionId)Object.assign(S.localSession,p);return p;}).catch(e=>{if(S.localSession?.sessionId===sessionId)abortLocalRecordingV7(e.message);toast(e.message,true);return null;});
   beginLocalRecording(provisional);
 }
 async function beginLocalRecording(p){
