@@ -1,0 +1,17 @@
+import { readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const patch = await readFile('public/app-v7-patch.js','utf8');
+const css = await readFile('public/app-v7.css','utf8');
+const html = await readFile('public/index.html','utf8');
+assert.match(patch, /max=\"3\"/);
+assert.match(patch, /createMediaElementSource/);
+assert.match(patch, /noiseSuppression/);
+assert.match(patch, /echoCancellation/);
+assert.match(patch, /S\._recordServerPromise=Promise\.resolve/);
+assert.match(patch, /beginLocalRecording\(provisional\)/);
+assert.match(patch, /function beginFinalPreview/);
+assert.match(css, /\.preview-v5\{display:none!important\}/);
+assert.match(css, /object-fit:contain/);
+assert.match(html, /app-v7-patch\.js\?v=0\.7\.0/);
+assert.match(html, /app-v7\.css\?v=0\.7\.0/);
+console.log('✓ DubRoom v0.7 client/audio static checks passed');
