@@ -15,7 +15,7 @@ export async function handleV9PreviewRequest(req, res, url) {
   }
   const maxTime = Math.max(room.range.start, room.range.end - .02);
   const currentTime = clamp(body.currentTime, room.range.start, maxTime);
-  const payload = { action, currentTime, effectiveAt: now() + 90, startTime: room.range.start, endTime: room.range.end };
+  const payload = { action, currentTime, effectiveAt: now() + (action === 'play' ? 160 : 0), startTime: room.range.start, endTime: room.range.end };
   broadcast(room, 'mix-preview-control', payload);
   sendJson(res, 200, { ok: true, ...payload });
   return true;
