@@ -70,12 +70,16 @@ export function allConnectedReady(room) {
   const connected = [...room.participants.values()].filter((p) => p.connected);
   return connected.length > 0 && connected.every((p) => p.ready);
 }
-export function stopParticipantRecording(room, participantId, stopAt = now() + 60) {
+export function stopParticipantRecording(room, participantId, stopAt = now(), explicitEndTime = null) {
   const recording = room.recordings.get(participantId);
   if (!recording) return null;
   if (recording.timer) clearTimeout(recording.timer);
   const elapsed = Math.max(0, stopAt - recording.startAt) / 1000;
-  const endTime = Math.min(recording.endTime, recording.startTime + elapsed);
+  const measuredEnd = recording.startTime + elapsed;
+  const requestedEnd = Number(explicitEndTime);
+  const endTime = Number.isFinite(requestedEnd)
+    ? Math.max(recording.startTime, Math.min(recording.endTime, requestedEnd))
+    : Math.min(recording.endTime, measuredEnd);
   room.recordings.delete(participantId);
   setNotReady(room, participantId);
   touch(room);
