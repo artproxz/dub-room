@@ -16,12 +16,17 @@ export async function handleMediaRequest(req, res, url) {
     if (!room.video) return sendJson(res, 409, { error: 'Сначала загрузите видео.' });
     if (!participant.armed) return sendJson(res, 409, { error: 'Сначала включите REC.' });
     if (room.recordings.has(participantId)) return sendJson(res, 409, { error: 'Ваша запись уже идёт.' });
-    const startTime = room.range.start, endTime = room.range.end;
-    const startAt = now() + 650;
-    const stopAt = startAt + Math.max(100, (endTime - startTime) * 1000);
-    const sessionId = randomId(10);
+    const requestedStart = Number(body.startTime);
+    const startTime = Number.isFinite(requestedStart)
+      ? clamp(requestedStart, room.range.start, Math.max(room.range.start, room.range.end - .05))
+      : room.range.start;
+    const endTime = room.range.end;
+    const startAt = now();
+    const stopAt = startAt + Math.max(100, (endTime - startTime) * 1000) + 1500;
+    const requestedSessionId = String(body.sessionId || '');
+    const sessionId = /^[A-Za-z0-9_-]{6,64}$/.test(requestedSessionId) ? requestedSessionId : randomId(10);
     const recording = { sessionId, participantId, startTime, endTime, startAt, stopAt };
-    recording.timer = setTimeout(() => stopParticipantRecording(room, participantId, stopAt), Math.max(0, stopAt - now()));
+    recording.timer = setTimeout(() => stopParticipantRecording(room, participantId, now(), endTime), Math.max(0, stopAt - now()));
     room.recordings.set(participantId, recording);
     participant.ready = false; touch(room);
     const payload = recordingPublic(recording);
@@ -36,7 +41,8 @@ export async function handleMediaRequest(req, res, url) {
     const body = await readJson(req);
     const participantId = String(body.participantId || '');
     if (!room.participants.has(participantId)) return sendJson(res, 403, { error: 'Не участник комнаты.' });
-    const payload = stopParticipantRecording(room, participantId);
+    const requestedEnd = Number(body.endTime);
+    const payload = stopParticipantRecording(room, participantId, now(), Number.isFinite(requestedEnd) ? requestedEnd : null);
     if (!payload) return sendJson(res, 409, { error: 'У вас нет активной записи.' });
     return sendJson(res, 200, { ok: true, ...payload });
   }
@@ -47,6 +53,14 @@ export async function handleMediaRequest(req, res, url) {
     const participant = room.participants.get(params.participantId);
     if (!participant) return sendJson(res, 403, { error: 'Участник не найден.' });
     if (String(req.headers['x-participant-id'] || '') !== participant.id) return sendJson(res, 403, { error: 'Нельзя загрузить запись за другого участника.' });
+    room.sessionClips ??= new Map();
+    const sessionKey = `${participant.id}:${params.sessionId}`;
+    const existingClipId = room.sessionClips.get(sessionKey);
+    if (existingClipId) {
+      const existing = room.clips.find((clip) => clip.id === existingClipId);
+      if (existing) return sendJson(res, 200, { ok: true, clip: clipPublic(existing), duplicate: true });
+      room.sessionClips.delete(sessionKey);
+    }
     const start = clamp(req.headers['x-clip-start'], 0, 24 * 60 * 60);
     const duration = clamp(req.headers['x-clip-duration'], .05, 60 * 60);
     const contentType = String(req.headers['content-type'] || 'audio/webm');
@@ -60,7 +74,7 @@ export async function handleMediaRequest(req, res, url) {
       peaks: parsePeaks(req.headers['x-waveform']), url: `/media/${relative}`, mimeType: contentType,
       createdAt: now(), filePath: target, editSeq: 0,
     };
-    room.clips.push(clip); setNotReady(room, participant.id); touch(room);
+    room.clips.push(clip); room.sessionClips.set(sessionKey, clip.id); setNotReady(room, participant.id); touch(room);
     broadcast(room, 'clip-created', { clip: clipPublic(clip), participant: participantPublic(participant) });
     return sendJson(res, 201, { ok: true, clip: clipPublic(clip) });
   }
