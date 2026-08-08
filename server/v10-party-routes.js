@@ -85,6 +85,16 @@ export async function handleV10PartyRequest(req, res, url) {
     const body = await readJson(req); const party = ensureParty(room); const actor=String(body.participantId||'');
     if (!isHost(room,actor)) { sendJson(res,403,{error:'Этим управляет ведущий.'}); return true; }
     const action=String(body.action||'');
+    if (action==='scene-ready') {
+      if (!room.video) { sendJson(res,409,{error:'Сначала загрузите фильм.'}); return true; }
+      if (party.phase!=='lobby') { sendJson(res,409,{error:'Сцену можно подтвердить только на этапе выбора.'}); return true; }
+      if (!(room.range.end>room.range.start)) { sendJson(res,409,{error:'Выберите фрагмент фильма.'}); return true; }
+      party.phase='roles'; resetReady(room); emitParty(room); sendJson(res,200,{ok:true,party:partyPublic(room)}); return true;
+    }
+    if (action==='edit-scene') {
+      if (party.phase!=='roles') { sendJson(res,409,{error:'Вернуться к сцене можно до начала озвучки.'}); return true; }
+      party.phase='lobby'; resetReady(room); emitParty(room); sendJson(res,200,{ok:true,party:partyPublic(room)}); return true;
+    }
     if (action==='save') {
       if (!party.savedRounds.some((x)=>x.round===party.round)) party.savedRounds.push({round:party.round,sceneIndex:party.sceneIndex,range:{...room.range},savedAt:now()});
       party.savedCurrent=true; emitParty(room); sendJson(res,200,{ok:true,party:partyPublic(room)}); return true;
