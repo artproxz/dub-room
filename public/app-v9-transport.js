@@ -2,7 +2,7 @@
 S.previewState = null;
 
 function v9EditableTarget(target){
-  return Boolean(target?.closest?.('input,textarea,select,button,[contenteditable="true"]'));
+  return Boolean(target?.closest?.('input,textarea,select,[contenteditable="true"]'));
 }
 function v9Movie(){return document.querySelector('#movie');}
 function v9MoviePlaying(){const m=v9Movie();return Boolean(m && !m.paused && !m.ended);}
@@ -31,7 +31,7 @@ async function v9SendPreviewControl(action,time){
 async function v9TogglePreview(){
   const m=v9Movie();if(!m||!isHost())return;
   if(v9MoviePlaying())return v9SendPreviewControl('pause',m.currentTime);
-  const start=clamp(Number(m.currentTime)||S.previewState?.currentTime||S.room.range.start,S.room.range.start,S.room.range.end-.02);
+  const raw=Number(m.currentTime);const start=clamp(Number.isFinite(raw)?raw:(S.previewState?.currentTime??S.room.range.start),S.room.range.start,S.room.range.end-.02);
   return v9SendPreviewControl('play',start);
 }
 async function v9TransportToggle(){
@@ -66,9 +66,11 @@ function v9ApplyPreviewControl(d){
   S.mode='preview';S.previewState={...(S.previewState||{}),...d,currentTime:Number(d.currentTime)||S.room.range.start};temporarilyMuteLobby(true);clearTimeout(S.playbackTimer);clearPlaybackAudio();
   const wait=Math.max(0,(Number(d.effectiveAt)||Date.now())-Date.now());
   S.playbackTimer=setTimeout(async()=>{
-    if(d.action==='pause'){m.pause();clearPlaybackAudio();S.previewState.currentTime=m.currentTime;updateControls();return;}
+    if(d.action==='pause'){
+      m.pause();clearPlaybackAudio();const t=clamp(Number(d.currentTime)||m.currentTime,S.room.range.start,S.room.range.end);m.currentTime=t;S.previewState.currentTime=t;updateControls();return;
+    }
     const start=clamp(Number(d.currentTime)||S.room.range.start,S.room.range.start,S.room.range.end-.02);m.pause();m.currentTime=start;applyMovieSound();
-    try{await m.play();if(S.mode!=='preview')return;playVoiceClips(start,S.room.range.end,'all');clearTimeout(S.playbackTimer);S.playbackTimer=setTimeout(()=>{if(S.mode!=='preview')return;m.pause();clearPlaybackAudio();m.currentTime=S.room.range.end;S.previewState={...S.previewState,currentTime:S.room.range.end};updateControls();},Math.max(50,(S.room.range.end-start)*1000+70));updateControls();}catch{toast('Браузер заблокировал общий просмотр.',true);updateControls();}
+    try{await m.play();if(S.mode!=='preview')return;playVoiceClips(start,S.room.range.end,'all');clearTimeout(S.playbackTimer);S.playbackTimer=setTimeout(()=>{if(S.mode!=='preview')return;m.pause();clearPlaybackAudio();m.currentTime=S.room.range.end;S.mode='idle';S.previewState=null;temporarilyMuteLobby(false);updateControls();},Math.max(50,(S.room.range.end-start)*1000+70));updateControls();}catch{toast('Браузер заблокировал общий просмотр.',true);updateControls();}
   },wait);
 }
 
