@@ -1,13 +1,13 @@
 {
   "name":"dub-room",
-  "version":"0.8.0",
+  "version":"0.9.0",
   "private":true,
   "type":"module",
   "engines":{"node":">=22"},
   "scripts":{
     "dev":"node --watch server/index-v5.js",
     "start":"node server/index-v5.js",
-    "check":"node --check server/index-v5.js && node --check server/v5-state.js && node --check server/v5-room-routes.js && node --check server/v5-media-routes.js && node --check server/lib.js && node --check public/app-v5-core.js && node --check public/app-v5-events.js && node --check public/app-v5-editor.js && node --check public/app-v5-playback.js && node --check public/app-v5-voice.js && node --check public/app-v6-patch.js && node --check public/app-v7-patch.js && node --check public/layout-v8.js && node --check public/app-v8-patch.js && node --check public/bootstrap-v8.js",
-    "test":"node tests/smoke-v5.mjs && node tests/smoke-v7-static.mjs && node tests/instant-start-v7.mjs && node tests/layout-v8.mjs && node tests/server-v8.mjs && node tests/static-v8.mjs"
+    "check":"node --check server/index-v5.js && node --check server/v5-state.js && node --check server/v5-room-routes.js && node --check server/v5-media-routes.js && node --check server/v9-preview-routes.js && node --check server/lib.js && node --check public/app-v5-core.js && node --check public/app-v5-events.js && node --check public/app-v5-editor.js && node --check public/app-v5-playback.js && node --check public/app-v5-voice.js && node --check public/app-v6-patch.js && node --check public/app-v7-patch.js && node --check public/layout-v8.js && node --check public/app-v8-patch.js && node --check public/bootstrap-v8.js && node --check public/app-v9-transport.js",
+    "test":"node tests/smoke-v5.mjs && node tests/smoke-v7-static.mjs && node tests/instant-start-v7.mjs && node tests/layout-v8.mjs && node tests/server-v8.mjs && node tests/static-v8.mjs && node tests/transport-v9.mjs && node tests/server-v9.mjs"
   }
 }
