@@ -2,6 +2,42 @@ import { now, sendSse, broadcast, touch } from './lib.js';
 
 export const PARTICIPANT_COLORS = ['#ff405f', '#8a5cff', '#f2ad3f'];
 
+export function ensureParty(room) {
+  room.party ??= {
+    phase: 'lobby',
+    round: 0,
+    sceneIndex: 1,
+    roundStartedAt: 0,
+    expectedParticipantIds: [],
+    completedParticipantIds: [],
+    successfulParticipantIds: [],
+    trackEpochs: {},
+    savedRounds: [],
+    savedCurrent: false,
+  };
+  room.party.expectedParticipantIds ??= [];
+  room.party.completedParticipantIds ??= [];
+  room.party.successfulParticipantIds ??= [];
+  room.party.trackEpochs ??= {};
+  room.party.savedRounds ??= [];
+  return room.party;
+}
+export function partyPublic(room) {
+  const p = ensureParty(room);
+  return {
+    phase: p.phase,
+    round: p.round,
+    sceneIndex: p.sceneIndex,
+    roundStartedAt: p.roundStartedAt,
+    expectedParticipantIds: [...p.expectedParticipantIds],
+    completedParticipantIds: [...p.completedParticipantIds],
+    successfulParticipantIds: [...p.successfulParticipantIds],
+    trackEpochs: { ...p.trackEpochs },
+    savedRounds: p.savedRounds.map((x) => ({ ...x, range: x.range ? { ...x.range } : undefined })),
+    savedCurrent: Boolean(p.savedCurrent),
+  };
+}
+
 export function participantPublic(p) {
   return {
     id: p.id,
@@ -50,6 +86,7 @@ export function roomSnapshot(room) {
     range: room.range,
     clips: room.clips.map(clipPublic),
     recordings: [...room.recordings.values()].map(recordingPublic),
+    party: partyPublic(room),
   };
 }
 export function broadcastSnapshot(room) { broadcast(room, 'room-state', roomSnapshot(room)); }
