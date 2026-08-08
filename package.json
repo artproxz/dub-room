@@ -1,13 +1,13 @@
 {
   "name":"dub-room",
-  "version":"0.6.0",
+  "version":"0.7.0",
   "private":true,
   "type":"module",
   "engines":{"node":">=22"},
   "scripts":{
     "dev":"node --watch server/index-v5.js",
     "start":"node server/index-v5.js",
-    "check":"node --check server/index-v5.js && node --check server/v5-state.js && node --check server/v5-room-routes.js && node --check server/v5-media-routes.js && node --check server/lib.js && node --check public/app-v5-core.js && node --check public/app-v5-events.js && node --check public/app-v5-editor.js && node --check public/app-v5-playback.js && node --check public/app-v5-voice.js && node --check public/app-v6-patch.js",
-    "test":"node tests/smoke-v5.mjs"
+    "check":"node --check server/index-v5.js && node --check server/v5-state.js && node --check server/v5-room-routes.js && node --check server/v5-media-routes.js && node --check server/lib.js && node --check public/app-v5-core.js && node --check public/app-v5-events.js && node --check public/app-v5-editor.js && node --check public/app-v5-playback.js && node --check public/app-v5-voice.js && node --check public/app-v6-patch.js && node --check public/app-v7-patch.js",
+    "test":"node tests/smoke-v5.mjs && node tests/smoke-v7-static.mjs"
   }
 }
