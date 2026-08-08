@@ -2,12 +2,14 @@ import { http, fsp, PORT, ROOM_TTL_MS, rooms, now, roomDir, sendJson } from './l
 import { handleRoomRequest } from './v5-room-routes.js';
 import { handleMediaRequest } from './v5-media-routes.js';
 import { handleV9PreviewRequest } from './v9-preview-routes.js';
+import { handleV10PartyRequest } from './v10-party-routes.js';
 
 const ROOM_ROUTE = /^\/api\/rooms\/[^/]+\/(join|state|events|participant|level|signal|range|video|video-meta)$/;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
+    if (await handleV10PartyRequest(req, res, url)) return;
     const roomRoute = url.pathname === '/api/health' || url.pathname === '/api/rooms' || ROOM_ROUTE.test(url.pathname);
     if (roomRoute) return await handleRoomRequest(req, res, url);
     if (await handleV9PreviewRequest(req, res, url)) return;
@@ -26,10 +28,12 @@ setInterval(() => {
   for (const [id, room] of rooms) {
     if (room.updatedAt > cutoff) continue;
     for (const r of room.recordings.values()) if (r.timer) clearTimeout(r.timer);
+    if (room.party?.phaseTimer) clearTimeout(room.party.phaseTimer);
+    if (room.party?.finalTimer) clearTimeout(room.party.finalTimer);
     for (const connections of room.sse.values()) for (const res of connections) res.end();
     rooms.delete(id);
     fsp.rm(roomDir(id), { recursive: true, force: true }).catch(() => undefined);
   }
 }, 30 * 60 * 1000).unref();
 
-server.listen(PORT, '0.0.0.0', () => console.log(`DubRoom v0.9.0: http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`DubRoom 1.0 party flow: http://localhost:${PORT}`));
