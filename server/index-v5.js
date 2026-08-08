@@ -1,6 +1,7 @@
 import { http, fsp, PORT, ROOM_TTL_MS, rooms, now, roomDir, sendJson } from './lib.js';
 import { handleRoomRequest } from './v5-room-routes.js';
 import { handleMediaRequest } from './v5-media-routes.js';
+import { handleV9PreviewRequest } from './v9-preview-routes.js';
 
 const ROOM_ROUTE = /^\/api\/rooms\/[^/]+\/(join|state|events|participant|level|signal|range|video|video-meta)$/;
 
@@ -9,6 +10,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const roomRoute = url.pathname === '/api/health' || url.pathname === '/api/rooms' || ROOM_ROUTE.test(url.pathname);
     if (roomRoute) return await handleRoomRequest(req, res, url);
+    if (await handleV9PreviewRequest(req, res, url)) return;
     return await handleMediaRequest(req, res, url);
   } catch (error) {
     console.error(error);
@@ -30,4 +32,4 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000).unref();
 
-server.listen(PORT, '0.0.0.0', () => console.log(`DubRoom v0.5.0: http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`DubRoom v0.9.0: http://localhost:${PORT}`));
